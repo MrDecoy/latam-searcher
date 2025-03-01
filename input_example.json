@@ -1,0 +1,14 @@
+{
+    "searches": [
+        {
+            "origin": "GRU",
+            "destination": "MAD",
+            "trip_type": "one_way",
+            "outbound_dates": {
+                "start": "2025-07-10",
+                "end": "2025-07-17"
+            },
+            "use_points": true
+        }
+    ]
+} 

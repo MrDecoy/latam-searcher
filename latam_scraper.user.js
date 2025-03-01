@@ -771,12 +771,11 @@
         params.append('chd', '0');
         params.append('inf', '0');
         params.append('trip', currentSearch.trip_type === 'round_trip' ? 'RT' : 'OW');
-        params.append('cabin', 'Economy');
+        params.append('cabin', currentSearch.cabin_class);
         params.append('redemption', currentSearch.use_points.toString());
         params.append('sort', 'RECOMMENDED');
 
         const url = `${baseUrl}?${params.toString()}`;
-        logger.log(`Navigating to: ${url}`, 'info');
         window.location.href = url;
     }
 
@@ -844,7 +843,6 @@
                 // Look for the tariff list using the correct selector
                 const tariffList = document.querySelector('ol');
                 if (!tariffList) {
-                    logger.log('Waiting for tariff list...', 'info');
                     setTimeout(checkForTariffs, 1000);
                     return;
                 }
@@ -867,12 +865,9 @@
                     if (priceElement) {
                         const priceText = priceElement.textContent.trim();
                         const priceValue = parsePriceValue(priceText);
-                        logger.log(`Tariff ${index + 1} price: ${priceText} (parsed: ${priceValue})`, 'info');
-
                         if (priceValue < cheapestPrice) {
                             cheapestPrice = priceValue;
                             cheapestTariff = item;
-                            logger.log(`New cheapest tariff found: ${priceText}`, 'info');
                         }
                     }
                 });
@@ -883,8 +878,6 @@
                         const selectButton = cheapestTariff.querySelector('button[data-testid$="-flight-select"]');
                         
                         if (selectButton && selectButton.offsetParent !== null) {  // Check if button is visible
-                            logger.log(`Found "Escolher" button with data-testid: ${selectButton.getAttribute('data-testid')}`, 'info');
-                            logger.log('Clicking "Escolher" button...', 'info');
                             selectButton.click();
                             waitingForButton = false;
                             
@@ -903,11 +896,6 @@
                                     const priceElement = card.querySelector('.displayCurrencystyle__CurrencyAmount-sc__sc-hel5vp-2');
                                     return priceElement && priceElement.textContent.trim() !== '';
                                 });
-
-                                logger.log(`Navigation attempt ${navigationAttempts + 1}:`, 'info');
-                                logger.log(`- Return title found: ${hasReturnTitle}`, 'info');
-                                logger.log(`- Return cards found: ${returnCards.length}`, 'info');
-                                logger.log(`- All prices loaded: ${allPricesLoaded}`, 'info');
 
                                 if (hasReturnTitle && hasReturnCards && allPricesLoaded) {
                                     logger.log('Return flight page loaded successfully with all elements', 'success');
@@ -956,7 +944,6 @@
                         }
 
                         buttonCheckAttempts++;
-                        logger.log(`Waiting for "Escolher" button to be clickable (attempt ${buttonCheckAttempts})...`, 'info');
                         setTimeout(waitForButton, 1000);
                     };
 
@@ -1450,6 +1437,24 @@
         `;
         form.appendChild(tripTypeContainer);
 
+        // Cabin class radio buttons
+        const cabinClassContainer = document.createElement('div');
+        cabinClassContainer.className = 'form-section';
+        cabinClassContainer.innerHTML = `
+            <h4>Cabin Class</h4>
+            <div class="radio-group">
+                <label class="radio-label">
+                    <input type="radio" name="cabin_class" value="Economy" checked>
+                    <span>Economy</span>
+                </label>
+                <label class="radio-label">
+                    <input type="radio" name="cabin_class" value="Business">
+                    <span>Business</span>
+                </label>
+            </div>
+        `;
+        form.appendChild(cabinClassContainer);
+
         // Outbound dates section
         const outboundSection = document.createElement('div');
         outboundSection.className = 'form-section';
@@ -1627,12 +1632,12 @@
                 const search = {
                     origin: origin,
                     destination: destination,
-                        trip_type: tripType,
-                        outbound_dates: {
+                    trip_type: tripType,
+                    outbound_dates: {
                         start: outboundStartDate,
                         end: outboundEndDate
-                        },
-                        use_points: document.getElementById('use_points').checked
+                    },
+                    use_points: document.getElementById('use_points').checked
                 };
 
                 // Add return dates if round trip is selected
@@ -1651,6 +1656,9 @@
                         end: returnEndDate
                     };
                 }
+
+                // Add cabin class to the search configuration
+                search.cabin_class = form.querySelector('input[name="cabin_class"]:checked').value;
 
                 // Create proper search configuration
                 searchConfig = {

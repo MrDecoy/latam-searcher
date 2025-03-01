@@ -1,0 +1,3 @@
+
+Outbound Flight: https://www.latamairlines.com/br/pt/oferta-voos?origin=GRU&outbound=2025-03-05T00%3A00%3A00.000Z&destination=MAD&adt=1&chd=0&inf=0&trip=OW&cabin=Economy&redemption=true&sort=RECOMMENDED
+Return Flight:https://www.latamairlines.com/br/pt/oferta-voos?origin=GRU&outbound=2025-03-05T00%3A00%3A00.000Z&destination=MAD&inbound=2025-03-09T00%3A00%3A00.000Z&adt=1&chd=0&inf=0&trip=RT&cabin=Economy&redemption=true&sort=RECOMMENDED

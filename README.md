@@ -13,7 +13,8 @@ A powerful browser extension script that helps you search and compare flight inf
 
 Watch our quick tutorial on how to use the LATAM Flight Searcher:
 
-https://github.com/MrDecoy/latam-searcher/blob/main/how_to_use.mp4
+https://github.com/user-attachments/assets/f75413ce-412f-4b77-8b69-f29bef4e1047
+
 
 ## Detailed Installation Instructions
 

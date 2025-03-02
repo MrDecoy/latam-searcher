@@ -1,110 +1,107 @@
-# LATAM Airlines Flight Scraper
+# LATAM Flight Searcher
 
-This script scrapes flight information from LATAM Airlines website and saves it to CSV files. It supports both regular price and points redemption searches, as well as one-way and round-trip flights.
+A powerful browser extension script that helps you search and compare flight information from LATAM Airlines, making it easier to track and compare flight prices over multiple dates.
 
-## Prerequisites
+## Quick Start Guide
 
-- Python 3.8 or higher
-- Chrome browser installed
+- Install Tampermonkey extension in your browser
+- Install the LATAM Flight Searcher script from [Greasyfork](https://greasyfork.org/en/scripts/528484-latam-flight-searcher)
+- Visit [LATAM Airlines](https://www.latamairlines.com)
+- Use the searcher interface in the top-right corner to start searching
 
-## Setup
+## Detailed Installation Instructions
 
-1. Install the required packages:
-```bash
-pip install -r requirements.txt
-```
+### 1. Installing Tampermonkey
 
-2. Configure the environment:
-   - Copy the `.env.example` file to `.env`
-   - Add your LATAM account credentials:
-     ```
-     LATAM_EMAIL=your_email_or_cpf
-     LATAM_PASSWORD=your_password
-     ```
+1. Visit your browser's extension store:
+   - [Chrome Web Store](https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo)
+   - [Firefox Add-ons](https://addons.mozilla.org/en-US/firefox/addon/tampermonkey/)
+   - [Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd)
 
-3. Create an input file:
-   - Copy `input_example.json` to `input.json`
-   - Modify the search parameters according to your needs
+2. Click "Add to [Browser]" or "Install"
+3. Follow any additional browser prompts to complete the installation
 
-## Input File Format
+### 2. Installing the LATAM Flight Searcher
 
-The input file should be a JSON file with the following structure:
+1. Visit the [LATAM Flight Searcher on Greasyfork](https://greasyfork.org/en/scripts/528484-latam-flight-searcher)
+2. Click the green "Install" button
+3. Tampermonkey will open a new tab showing the script
+4. Click "Install" or "Update" to add the script to Tampermonkey
 
-```json
-{
-    "searches": [
-        {
-            "origin": "GRU",
-            "destination": "MAD",
-            "trip_type": "round_trip",
-            "outbound_dates": {
-                "start": "2024-07-15",
-                "end": "2024-07-20"
-            },
-            "return_dates": {
-                "start": "2024-08-10",
-                "end": "2024-08-15"
-            },
-            "use_points": false
-        },
-        {
-            "origin": "GRU",
-            "destination": "MIA",
-            "trip_type": "one_way",
-            "outbound_dates": {
-                "start": "2024-09-10",
-                "end": "2024-09-15"
-            },
-            "use_points": true
-        }
-    ]
-}
-```
+## Using the Searcher
 
-Each search object requires:
-- `origin`: Origin airport code (e.g., GRU, MIA)
-- `destination`: Destination airport code
-- `trip_type`: Either "one_way" or "round_trip"
-- `outbound_dates`: Object with start and end dates for outbound flight search
-- `use_points`: Boolean indicating whether to search for points redemption
-- `return_dates`: Required for round_trip searches, object with start and end dates
+### Basic Usage
 
-## Usage
+1. Visit [LATAM Airlines](https://www.latamairlines.com)
+2. Look for the searcher interface in the top-right corner of the page
+3. Fill in your search criteria:
+   - Origin airport (e.g., GRU for São Paulo)
+   - Destination airport (e.g., MAD for Madrid)
+   - Trip type (One Way or Round Trip)
+   - Cabin class (Economy or Business)
+   - Date ranges for departure (and return if round trip)
+   - Whether to search using points or money
 
-Run the script:
-```bash
-python latam_scraper.py --input input.json
-```
+4. Click "Start Search" to begin
 
-Or use the default input file name:
-```bash
-python latam_scraper.py
-```
+### Advanced Features
 
-The script will:
-1. Load the search parameters from the input file
-2. Log in to your LATAM account
-3. Search for flights according to each set of parameters
-4. Save the results to CSV files in the `flight_data` directory
+- **Draggable Interface**: Move the searcher window anywhere on the screen
+- **Minimize/Maximize**: Collapse the interface when not in use
+- **Progress Tracking**: Monitor the search progress in real-time
+- **CSV Export**: Results are automatically saved to a CSV file
 
-## Output
+### Understanding the Results
 
-The script creates CSV files in the `flight_data` directory with names following this pattern:
-```
-flights_[ORIGIN]_[DESTINATION]_[points/cash]_[one_way/round_trip]_[TIMESTAMP].csv
-```
-
-Each CSV file contains:
-- Flight date
-- Origin and destination
-- Departure and arrival times
-- Price (in currency or points)
+The searcher will save a CSV file containing:
+- Flight dates and times
+- Origin and destination airports
 - Flight duration
-- Trip type (one_way/outbound/return)
+- Prices (in currency or points)
+- Taxes and fees information
+- Additional flight details
 
-## Notes
+## Tips for Best Results
 
-- The script uses Selenium WebDriver to automate Chrome browser
-- First run will require logging in to your LATAM account
-- The script may need adjustments if LATAM's website structure changes
-- Be mindful of rate limiting and don't make too many requests in a short time 
+1. **Date Ranges**: Keep date ranges reasonable (1-2 weeks) for faster results
+2. **Browser Performance**: Avoid running other intensive tasks while searching
+3. **Network Connection**: Ensure a stable internet connection
+4. **Multiple Searches**: Use the JSON input for multiple route configurations
+
+## Troubleshooting
+
+If you encounter issues:
+
+1. **Script Not Working**
+   - Ensure Tampermonkey is properly installed
+   - Check if the script is enabled in Tampermonkey
+   - Try refreshing the page
+
+2. **No Results**
+   - Verify the airport codes are correct
+   - Ensure the dates are valid
+   - Check if the route is operated by LATAM
+
+3. **Slow Performance**
+   - Reduce the date range
+   - Close unnecessary browser tabs
+   - Clear browser cache
+
+## Support
+
+For issues or questions:
+1. Visit the [Greasyfork script page](https://greasyfork.org/en/scripts/528484-latam-flight-searcher)
+2. Leave a comment or feedback
+3. Check for script updates regularly
+
+## Disclaimer
+
+This script was created as a test project and is intended for educational purposes only. It serves as a demonstration of browser automation and data processing techniques. The tool should be used responsibly and in accordance with LATAM Airlines' terms and conditions. Any automated access to the website should be done at a reasonable rate that does not disrupt their services.
+
+Key points:
+- Educational project for learning purposes
+- Not for commercial use
+- Respect website terms and conditions
+- Use responsibly and ethically
+- Do not abuse or overuse the tool
+- Not affiliated with LATAM Airlines 

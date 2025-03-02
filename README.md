@@ -4,10 +4,16 @@ A powerful browser extension script that helps you search and compare flight inf
 
 ## Quick Start Guide
 
-- Install Tampermonkey extension in your browser ([Chrome Web Store](https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo), [Firefox](https://addons.mozilla.org/en-US/firefox/addon/tampermonkey/), [Edge](https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd))
+- Install Tampermonkey extension in your browser ([Chrome](https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo), [Firefox](https://addons.mozilla.org/en-US/firefox/addon/tampermonkey/), [Edge](https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd))
 - Install the LATAM Flight Searcher script from [Greasyfork](https://greasyfork.org/en/scripts/528484-latam-flight-searcher)
 - Visit [LATAM Airlines](https://www.latamairlines.com)
 - Use the searcher interface in the top-right corner to start searching
+
+## Video Tutorial
+
+Watch our quick tutorial on how to use the LATAM Flight Searcher:
+
+https://github.com/MrDecoy/latam-searcher/blob/main/how_to_use.mp4
 
 ## Detailed Installation Instructions
 

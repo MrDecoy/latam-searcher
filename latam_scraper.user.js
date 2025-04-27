@@ -24,6 +24,73 @@
 (function() {
     'use strict';
 
+    // Selector configuration for HTML elements
+    const SELECTORS = {
+        // Flight cards and information
+        flightCards: {
+            main: '[data-testid^="flight-card-"], [data-testid^="flight-info-"], [data-testid^="wrapper-card-flight-"]',
+            clickable: '[data-testid$="-select-flight"], [data-testid$="-select-cabin"], button[data-testid*="-flight-"], [role="button"][data-testid*="-flight-"], [data-testid*="select"], [data-testid*="choose"], button[data-testid*="select"], button[data-testid*="choose"]',
+            origin: {
+                container: '[data-testid$="-origin"]',
+                time: '.flightInfostyles__TextHourFlight-sc__sc-edlvrg-4',
+                airport: '.flightInfostyles__TextIATA-sc__sc-edlvrg-5'
+            },
+            destination: {
+                container: '[data-testid$="-destination"]',
+                time: '.flightInfostyles__TextHourFlight-sc__sc-edlvrg-4',
+                nextDay: '.flightInfostyles__TextDaysDifference-sc__sc-edlvrg-6',
+                airport: '.flightInfostyles__TextIATA-sc__sc-edlvrg-5'
+            },
+            duration: '[data-testid$="-duration"] span:last-child',
+            price: {
+                container: '[data-testid$="-amount"]',
+                amount: '.displayCurrencystyle__CurrencyAmount-sc__sc-hel5vp-2',
+                description: '.displayCurrencystyle__Description-sc__sc-hel5vp-5',
+                taxes: '.flightInfostyles__TaxesFeesIncludedText-sc__sc-edlvrg-10'
+            }
+        },
+        // Tariff selection
+        tariffs: {
+            list: 'ol',
+            item: 'li[data-brand]',
+            selectButton: 'button[data-testid$="-flight-select"]'
+        },
+        // Page elements
+        page: {
+            returnTitle: '#titleSelectFlightDesktop .route-title',
+            errorMessage: '.error-message, .error-title, .error-description'
+        }
+    };
+
+    // Save selector configuration
+    function saveSelectors() {
+        GM_setValue('scraperSelectors', JSON.stringify(SELECTORS));
+    }
+
+    // Load saved selectors
+    function loadSelectors() {
+        const savedSelectors = GM_getValue('scraperSelectors');
+        if (savedSelectors) {
+            try {
+                Object.assign(SELECTORS, JSON.parse(savedSelectors));
+                logger.log('Loaded custom selectors', 'info');
+            } catch (e) {
+                logger.log('Error loading custom selectors: ' + e.message, 'error');
+            }
+        }
+    }
+
+    // Function to update selectors
+    function updateSelectors(newSelectors) {
+        try {
+            Object.assign(SELECTORS, newSelectors);
+            saveSelectors();
+            logger.log('Updated selectors successfully', 'success');
+        } catch (e) {
+            logger.log('Error updating selectors: ' + e.message, 'error');
+        }
+    }
+
     // Add daterangepicker and jQuery UI CSS
     GM_addStyle(GM_getResourceText('DATERANGEPICKER_CSS'));
     GM_addStyle(GM_getResourceText('JQUERYUI_CSS'));
@@ -171,8 +238,45 @@
 
     // Save current state
     function saveState() {
-        GM_setValue('scraperState', JSON.stringify(config));
-        logger.log('State saved', 'info');
+        // Create a clean copy of the state without DOM elements
+        const cleanState = {
+            searches: config.searches.map(search => ({
+                ...search,
+                // Remove any potential DOM references
+                selectedCard: undefined,
+                element: undefined
+            })),
+            currentSearchIndex: config.currentSearchIndex,
+            currentDateIndex: config.currentDateIndex,
+            isProcessing: config.isProcessing,
+            // Only save the serializable parts of the results
+            results: config.results.map(result => {
+                const cleanResult = { ...result };
+                // Remove any DOM references or circular structures
+                delete cleanResult.element;
+                delete cleanResult.selectedCard;
+                return cleanResult;
+            })
+        };
+
+        try {
+            GM_setValue('scraperState', JSON.stringify(cleanState));
+            logger.log('State saved successfully', 'info');
+        } catch (error) {
+            logger.log(`Error saving state: ${error.message}`, 'error');
+            // If there's an error, try to save a minimal state
+            const minimalState = {
+                currentSearchIndex: config.currentSearchIndex,
+                currentDateIndex: config.currentDateIndex,
+                isProcessing: config.isProcessing
+            };
+            try {
+                GM_setValue('scraperState', JSON.stringify(minimalState));
+                logger.log('Saved minimal state as fallback', 'warning');
+            } catch (e) {
+                logger.log('Failed to save even minimal state', 'error');
+            }
+        }
     }
 
     // Clear saved state
@@ -386,14 +490,18 @@
             let attempts = 0;
             
             const checkForCards = () => {
-                const flightCards = document.querySelectorAll('[data-testid^="flight-card-"], [data-testid^="flight-info-"]');
+                logger.log(`Checking for flight cards (attempt ${attempts + 1}/${maxAttempts})...`, 'info');
+                const flightCards = document.querySelectorAll(SELECTORS.flightCards.main);
                 
                 if (flightCards.length > 0) {
+                    logger.log(`Found ${flightCards.length} flight cards`, 'success');
                     resolve(true);
                 } else if (attempts >= maxAttempts) {
+                    logger.log('Max attempts reached, no flight cards found', 'error');
                     resolve(false);
                 } else {
                     attempts++;
+                    logger.log('No flight cards found yet, retrying...', 'info');
                     setTimeout(checkForCards, 2000);
                 }
             };
@@ -404,126 +512,149 @@
 
     // Helper function to parse price values
     function parsePriceValue(price) {
-        if (!price) return Infinity;
+        if (!price) {
+            logger.log('Empty price value received', 'warning');
+            return Infinity;
+        }
         
-        if (price.includes('pontos')) {
-            // Handle points format: "130.000 pontos + R$ 63,90"
-            const pointsMatch = price.match(/(\d+[\d,.]*)\s*pontos/);
-            return pointsMatch ? parseFloat(pointsMatch[1].replace(/[.,]/g, '')) : Infinity;
+        logger.log(`Parsing price value: "${price}"`, 'info');
+        
+        if (price.includes('milhas')) {
+            // Handle points format: "130.000 milhas + R$ 63,90"
+            const pointsMatch = price.match(/(\d+[.,\d]*)\s*milhas/);
+            if (pointsMatch) {
+                const pointsValue = parseFloat(pointsMatch[1].replace(/\./g, '').replace(',', '.'));
+                logger.log(`Parsed points value: ${pointsValue}`, 'info');
+                return pointsValue;
+            }
+            logger.log('Failed to parse points value', 'warning');
+            return Infinity;
         } else {
             // Handle regular price format: "R$ 2.530,90"
-            const priceMatch = price.match(/R\$\s*(\d+[\d,.]*)/);
-            return priceMatch ? parseFloat(priceMatch[1].replace(/\./g, '').replace(',', '.')) : Infinity;
+            const priceMatch = price.match(/R\$\s*(\d+[.,\d]*)/);
+            if (priceMatch) {
+                // First remove dots (thousand separators), then replace comma with dot for decimal
+                const priceValue = parseFloat(priceMatch[1].replace(/\./g, '').replace(',', '.'));
+                logger.log(`Parsed price value: ${priceValue}`, 'info');
+                return priceValue;
+            }
+            logger.log('Failed to parse regular price value', 'warning');
+            return Infinity;
         }
     }
 
-    // Extract flight information from the page
+    // Extract flight information from the page and select cheapest flight
     function extractFlightInfo() {
-        const flights = [];
-        const currentSearch = config.searches[config.currentSearchIndex];
+        try {
+            logger.log('Starting flight information extraction...', 'info');
+            const flightCards = document.querySelectorAll(SELECTORS.flightCards.main);
+            logger.log(`Found ${flightCards.length} flight cards`, 'info');
 
-        logger.log(`Attempting to extract flights for ${currentSearch.origin} to ${currentSearch.destination} on ${currentSearch.currentDate}`);
-
-        // Check if we're on the return flight page
-        const returnTitle = document.querySelector('#titleSelectFlightDesktop .route-title');
-        const isReturnPage = returnTitle && returnTitle.textContent.trim().toLowerCase() === 'voo de volta';
-
-        // Try both possible selectors for flight cards
-        const flightCards = document.querySelectorAll('[data-testid^="flight-card-"], [data-testid^="flight-info-"], [data-testid^="wrapper-card-flight-"]');
-        if (!flightCards.length) {
-            return null;
-        }
-
-        // For round trips, we need to handle both outbound and inbound flights
-        const isRoundTrip = currentSearch.trip_type === 'round_trip';
-        const flightType = isRoundTrip ? (isReturnPage ? 'return' : 'outbound') : 'one_way';
-
-        // Generate a unique ID for this flight combination
-        let combinationId;
-        if (isRoundTrip) {
-            // For round trips, use both outbound and return dates in the combination ID
-            combinationId = `${currentSearch.origin}_${currentSearch.destination}_${currentSearch.currentDate}_${currentSearch.currentReturnDate}_${currentSearch.use_points ? 'points' : 'cash'}_${currentSearch.trip_type}`;
-        } else {
-            // For one-way flights
-            combinationId = `${currentSearch.origin}_${currentSearch.destination}_${currentSearch.currentDate}_${currentSearch.use_points ? 'points' : 'cash'}_${currentSearch.trip_type}`;
-        }
-
-        logger.log(`Processing combination ID: ${combinationId}`, 'info');
-
-        flightCards.forEach((card, index) => {
-            try {
-                // Extract origin info
-                const originInfo = card.querySelector('[data-testid$="-origin"]');
-                const departureTime = originInfo?.querySelector('.flightInfostyles__TextHourFlight-sc__sc-edlvrg-4')?.textContent.trim();
-                const originAirport = originInfo?.querySelector('.flightInfostyles__TextIATA-sc__sc-edlvrg-5')?.textContent.trim();
-
-                // Extract destination info
-                const destinationInfo = card.querySelector('[data-testid$="-destination"]');
-                const arrivalTimeElement = destinationInfo?.querySelector('.flightInfostyles__TextHourFlight-sc__sc-edlvrg-4');
-                let arrivalTime = arrivalTimeElement?.textContent.trim();
-                const nextDayIndicator = arrivalTimeElement?.querySelector('.flightInfostyles__TextDaysDifference-sc__sc-edlvrg-6')?.textContent.trim();
-                const destinationAirport = destinationInfo?.querySelector('.flightInfostyles__TextIATA-sc__sc-edlvrg-5')?.textContent.trim();
-
-                // Extract duration
-                const duration = card.querySelector('[data-testid$="-duration"] span:last-child')?.textContent.trim();
-
-                // Extract price information
-                const priceInfo = card.querySelector('[data-testid$="-amount"]');
-                let price = '';
-                let taxInfo = '';
-
-                if (currentSearch.use_points) {
-                    // Points format
-                    const pointsAmount = priceInfo?.querySelector('.displayCurrencystyle__CurrencyAmount-sc__sc-hel5vp-2')?.textContent.trim();
-                    const additionalFees = priceInfo?.querySelector('.displayCurrencystyle__Description-sc__sc-hel5vp-5')?.textContent.trim();
-                    price = `${pointsAmount || ''} ${additionalFees || ''}`.trim();
-                } else {
-                    // Regular price format
-                    price = priceInfo?.querySelector('.displayCurrencystyle__CurrencyAmount-sc__sc-hel5vp-2')?.textContent.trim() || '';
-                }
-
-                // Get taxes info if available
-                taxInfo = priceInfo?.querySelector('.flightInfostyles__TaxesFeesIncludedText-sc__sc-edlvrg-10')?.textContent.trim();
-
-                const flightInfo = {
-                    combination_id: combinationId,
-                    trip_type: currentSearch.trip_type,
-                    flight_type: flightType,
-                    outbound_date: currentSearch.currentDate,
-                    return_date: isRoundTrip ? currentSearch.currentReturnDate : '',
-                    date: isReturnPage ? currentSearch.currentReturnDate : currentSearch.currentDate,
-                    origin: originAirport || (isReturnPage ? currentSearch.destination : currentSearch.origin),
-                    destination: destinationAirport || (isReturnPage ? currentSearch.origin : currentSearch.destination),
-                    departure_time: departureTime,
-                    arrival_time: arrivalTime,
-                    next_day: nextDayIndicator ? true : false,
-                    duration: duration,
-                    price: price,
-                    taxes_included: taxInfo ? true : false,
-                    use_points: currentSearch.use_points,
-                    raw_price_value: parsePriceValue(price)
-                };
-
-                flights.push(flightInfo);
-            } catch (e) {
-                logger.log(`Error extracting flight ${index + 1}: ${e.message}`, 'error');
+            if (!flightCards.length) {
+                logger.log('No flight cards found on the page', 'warning');
+                return { flights: [], selectedCard: null, selectedCardIndex: -1 };
             }
-        });
 
-        // Sort flights by price and get only the cheapest one
-        if (flights.length > 0) {
-            const cheapestFlight = flights
-                .sort((a, b) => a.raw_price_value - b.raw_price_value)[0];
-            
-                // Remove the raw_price_value before returning
-            const { raw_price_value, ...cleanFlight } = cheapestFlight;
-            
-            logger.log(`Selected cheapest ${flightType} flight: ${cleanFlight.departure_time} -> ${cleanFlight.arrival_time} - ${cleanFlight.price}`, 'success');
-            
-            return [cleanFlight]; // Return array with single cheapest flight
+            const flights = [];
+            let selectedCard = null;
+            let lowestPrice = Infinity;
+            let lowestPriceIndex = -1;
+
+            flightCards.forEach((card, index) => {
+                try {
+                    const priceElement = card.querySelector(SELECTORS.flightCards.price.amount);
+                    if (!priceElement) {
+                        logger.log(`No price element found for card ${index}`, 'warning');
+                        return;
+                    }
+
+                    const priceText = priceElement.textContent.trim();
+                    logger.log(`Processing card ${index} with price text: ${priceText}`, 'debug');
+
+                    const priceValue = parsePriceValue(priceText);
+                    logger.log(`Parsed price value: ${priceValue}`, 'info');
+
+                    if (priceValue < lowestPrice) {
+                        lowestPrice = priceValue;
+                        selectedCard = card;
+                        lowestPriceIndex = index;
+                        logger.log(`New lowest price found: ${priceText} (${priceValue}) at index ${index}`, 'info');
+                    }
+
+                    // Extract other flight information
+                    const originInfo = card.querySelector(SELECTORS.flightCards.origin.container);
+                    const departureTime = originInfo?.querySelector(SELECTORS.flightCards.origin.time)?.textContent.trim();
+                    const originAirport = originInfo?.querySelector(SELECTORS.flightCards.origin.airport)?.textContent.trim();
+
+                    const destinationInfo = card.querySelector(SELECTORS.flightCards.destination.container);
+                    const arrivalTimeElement = destinationInfo?.querySelector(SELECTORS.flightCards.destination.time);
+                    let arrivalTime = arrivalTimeElement?.textContent.trim();
+                    const nextDayIndicator = arrivalTimeElement?.querySelector(SELECTORS.flightCards.destination.nextDay)?.textContent.trim();
+                    const destinationAirport = destinationInfo?.querySelector(SELECTORS.flightCards.destination.airport)?.textContent.trim();
+
+                    const duration = card.querySelector(SELECTORS.flightCards.duration)?.textContent.trim();
+
+                    const priceInfo = card.querySelector(SELECTORS.flightCards.price.container);
+                    let price = '';
+                    let taxInfo = '';
+                    
+                    if (document.getElementById('use_points')?.checked) {
+                        // Points format
+                        const pointsAmount = priceInfo?.querySelector(SELECTORS.flightCards.price.amount)?.textContent.trim();
+                        const additionalFees = priceInfo?.querySelector(SELECTORS.flightCards.price.description)?.textContent.trim();
+                        price = `${pointsAmount || ''} ${additionalFees || ''}`.trim();
+                        logger.log(`Extracted points price: "${price}"`, 'info');
+                    } else {
+                        // Regular price format
+                        price = priceInfo?.querySelector(SELECTORS.flightCards.price.amount)?.textContent.trim() || '';
+                        logger.log(`Extracted regular price: "${price}"`, 'info');
+                    }
+
+                    // Get taxes info if available
+                    taxInfo = priceInfo?.querySelector(SELECTORS.flightCards.price.taxes)?.textContent.trim();
+
+                    const currentSearch = config.searches[config.currentSearchIndex];
+                    const flightInfo = {
+                        combination_id: `${currentSearch.origin}_${currentSearch.destination}_${currentSearch.currentDate}_${currentSearch.currentReturnDate || ''}_${document.getElementById('use_points')?.checked}_${currentSearch.trip_type}`,
+                        trip_type: currentSearch.trip_type,
+                        flight_type: currentSearch.trip_type === 'round_trip' ? (document.querySelector(SELECTORS.page.returnTitle)?.textContent.trim().toLowerCase() === 'voo de volta' ? 'return' : 'outbound') : 'one_way',
+                        outbound_date: currentSearch.currentDate,
+                        return_date: currentSearch.trip_type === 'round_trip' ? currentSearch.currentReturnDate : '',
+                        date: currentSearch.trip_type === 'round_trip' ? currentSearch.currentReturnDate : currentSearch.currentDate,
+                        origin: originAirport || (currentSearch.trip_type === 'round_trip' ? currentSearch.destination : currentSearch.origin),
+                        destination: destinationAirport || (currentSearch.trip_type === 'round_trip' ? currentSearch.origin : currentSearch.destination),
+                        departure_time: departureTime,
+                        arrival_time: arrivalTime,
+                        next_day: nextDayIndicator ? true : false,
+                        duration: duration,
+                        price: price,
+                        taxes_included: taxInfo ? true : false,
+                        use_points: document.getElementById('use_points')?.checked || false,
+                        raw_price_value: priceValue,
+                        card_index: index // Store the index instead of the DOM element
+                    };
+
+                    flights.push(flightInfo);
+                } catch (e) {
+                    logger.log(`Error extracting flight ${index + 1}: ${e.message}`, 'error');
+                }
+            });
+
+            if (selectedCard) {
+                logger.log(`Selected cheapest flight at index ${lowestPriceIndex} with price: ${lowestPrice}`, 'success');
+                return { 
+                    flights,
+                    selectedCard,
+                    selectedCardIndex: lowestPriceIndex // Return the index for reference
+                };
+            } else {
+                logger.log('No flight cards found with valid prices', 'warning');
+                return { flights: [], selectedCard: null, selectedCardIndex: -1 };
+            }
+        } catch (e) {
+            logger.log(`Error extracting flight information: ${e.message}`, 'error');
+            return { flights: [], selectedCard: null, selectedCardIndex: -1 };
         }
-
-        return null;
     }
 
     // Save results to CSV file
@@ -575,6 +706,8 @@
             // Group flights by combination_id
             const flightGroups = {};
             config.results.forEach(flight => {
+                logger.log(`Processing flight for CSV: ${JSON.stringify(flight)}`, 'info');
+                
                 if (!flightGroups[flight.combination_id]) {
                     flightGroups[flight.combination_id] = {
                         outbound: null,
@@ -598,6 +731,8 @@
 
             // Process each flight group into a single row
             Object.entries(flightGroups).forEach(([combinationId, group]) => {
+                logger.log(`Processing group ${combinationId} for CSV: ${JSON.stringify(group)}`, 'info');
+                
                 const outbound = group.outbound;
                 const return_flight = group.return;
                 const status = group.status;
@@ -605,17 +740,19 @@
                 
                 // Calculate total price only for successful searches
                 let total_price = '';
-                if (status === 'success' && outbound?.price) {
-                    if (outbound.trip_type === 'one_way' || return_flight?.price) {
+                if (status === 'success') {
+                    if (outbound?.price) {
                         if (outbound.trip_type === 'one_way') {
                             total_price = outbound.price;
-                        } else {
+                        } else if (return_flight?.price) {
                             // For round trips, combine prices if both are available
-                            const outPrice = parsePriceValue(outbound.price);
-                            const returnPrice = parsePriceValue(return_flight.price);
                             if (outbound.use_points) {
-                                total_price = `${outPrice + returnPrice} pontos`;
+                                const outPoints = parsePriceValue(outbound.price);
+                                const returnPoints = parsePriceValue(return_flight.price);
+                                total_price = `${outPoints + returnPoints} milhas`;
                             } else {
+                                const outPrice = parsePriceValue(outbound.price);
+                                const returnPrice = parsePriceValue(return_flight.price);
                                 total_price = `R$ ${(outPrice + returnPrice).toFixed(2)}`;
                             }
                         }
@@ -629,28 +766,28 @@
                     status,
                     retries,
                     total_price,
-                    // Outbound flight data (empty if failed)
-                    status === 'success' ? (outbound?.date || '') : '',
-                    status === 'success' ? (outbound?.origin || '') : '',
-                    status === 'success' ? (outbound?.destination || '') : '',
-                    status === 'success' ? (outbound?.departure_time || '') : '',
-                    status === 'success' ? (outbound?.arrival_time || '') : '',
-                    status === 'success' ? (outbound?.next_day ? 'Yes' : 'No') : '',
-                    status === 'success' ? (outbound?.duration || '') : '',
-                    status === 'success' ? (outbound?.price || '') : '',
-                    status === 'success' ? (outbound?.taxes_included ? 'Yes' : 'No') : '',
-                    // Return flight data (empty if failed or one-way)
-                    status === 'success' ? (return_flight?.date || '') : '',
-                    status === 'success' ? (return_flight?.origin || '') : '',
-                    status === 'success' ? (return_flight?.destination || '') : '',
-                    status === 'success' ? (return_flight?.departure_time || '') : '',
-                    status === 'success' ? (return_flight?.arrival_time || '') : '',
-                    status === 'success' ? (return_flight?.next_day ? 'Yes' : 'No') : '',
-                    status === 'success' ? (return_flight?.duration || '') : '',
-                    status === 'success' ? (return_flight?.price || '') : '',
-                    status === 'success' ? (return_flight?.taxes_included ? 'Yes' : 'No') : ''
+                    // Outbound flight data
+                    outbound?.outbound_date || '',
+                    outbound?.origin || '',
+                    outbound?.destination || '',
+                    outbound?.departure_time || '',
+                    outbound?.arrival_time || '',
+                    outbound?.next_day ? 'Yes' : 'No',
+                    outbound?.duration || '',
+                    outbound?.price || '',
+                    outbound?.taxes_included ? 'Yes' : 'No',
+                    // Return flight data
+                    return_flight?.date || '',
+                    return_flight?.origin || '',
+                    return_flight?.destination || '',
+                    return_flight?.departure_time || '',
+                    return_flight?.arrival_time || '',
+                    return_flight?.next_day ? 'Yes' : 'No',
+                    return_flight?.duration || '',
+                    return_flight?.price || '',
+                    return_flight?.taxes_included ? 'Yes' : 'No'
                 ].map(value => {
-                    // Handle values that might contain commas
+                    // Handle values that might contain commas or quotes
                     if (typeof value === 'string' && (value.includes(',') || value.includes('"') || value.includes('\n') || value.includes('\r'))) {
                         return `"${value.replace(/"/g, '""')}"`;
                     }
@@ -683,6 +820,8 @@
             logger.log(`Successfully saved results to ${filename}`, 'success');
         } catch (e) {
             logger.log(`Error saving CSV: ${e.message}`, 'error');
+            console.error('Full error:', e);
+            console.log('Results being processed:', config.results);
         }
     }
 
@@ -799,37 +938,6 @@
         processNext();
     }
 
-    // Function to select the cheapest flight card
-    async function selectCheapestFlightCard() {
-        const flightCards = document.querySelectorAll('[data-testid^="flight-card-"], [data-testid^="flight-info-"]');
-        if (!flightCards.length) {
-            logger.log('No flight cards found to select', 'error');
-            return false;
-        }
-
-        let cheapestCard = null;
-        let cheapestPrice = Infinity;
-
-        flightCards.forEach(card => {
-            const priceInfo = card.querySelector('[data-testid$="-amount"]');
-            const priceText = priceInfo?.textContent.trim() || '';
-            const priceValue = parsePriceValue(priceText);
-            
-            if (priceValue < cheapestPrice) {
-                cheapestPrice = priceValue;
-                cheapestCard = card;
-            }
-        });
-
-        if (cheapestCard) {
-            logger.log('Found cheapest flight card, clicking to reveal tariffs...', 'info');
-            cheapestCard.click();
-            return true;
-        }
-
-        return false;
-    }
-
     // Function to select the cheapest tariff option
     async function selectCheapestTariff() {
         return new Promise((resolve, reject) => {
@@ -840,101 +948,141 @@
             const maxButtonCheckAttempts = 10;
 
             const checkForTariffs = () => {
+                logger.log('Checking for tariff list...', 'info');
+                
                 // Look for the tariff list using the correct selector
-                const tariffList = document.querySelector('ol');
+                const tariffList = document.querySelector(SELECTORS.tariffs.list);
                 if (!tariffList) {
+                    logger.log('Tariff list not found, retrying...', 'warning');
                     setTimeout(checkForTariffs, 1000);
                     return;
                 }
 
                 // Find all tariff items (li elements)
-                const tariffItems = tariffList.querySelectorAll('li[data-brand]');
+                const tariffItems = tariffList.querySelectorAll(SELECTORS.tariffs.item);
+                logger.log(`Found ${tariffItems.length} tariff items`, 'info');
+                
                 if (!tariffItems.length) {
-                    logger.log('No tariff options found', 'error');
+                    logger.log('No tariff options found in the list', 'error');
                     resolve(false);
                     return;
                 }
 
-                logger.log(`Found ${tariffItems.length} tariff options`, 'info');
                 let cheapestTariff = null;
                 let cheapestPrice = Infinity;
+                let debugPrices = [];
 
                 tariffItems.forEach((item, index) => {
                     // Find the price element within the tariff item
-                    const priceElement = item.querySelector('.displayCurrencystyle__CurrencyAmount-sc__sc-hel5vp-2');
+                    const priceElement = item.querySelector(SELECTORS.flightCards.price.amount);
                     if (priceElement) {
                         const priceText = priceElement.textContent.trim();
                         const priceValue = parsePriceValue(priceText);
+                        debugPrices.push({ index, priceText, priceValue });
+                        
                         if (priceValue < cheapestPrice) {
                             cheapestPrice = priceValue;
                             cheapestTariff = item;
+                            logger.log(`New cheapest tariff found: ${priceText} (${priceValue})`, 'info');
                         }
+                    } else {
+                        logger.log(`No price element found for tariff item ${index}`, 'warning');
                     }
                 });
 
+                logger.log('Debug prices found:', 'info');
+                debugPrices.forEach(p => {
+                    logger.log(`Index ${p.index}: ${p.priceText} (${p.priceValue})`, 'info');
+                });
+
                 if (cheapestTariff) {
+                    logger.log('Found cheapest tariff, attempting to click...', 'info');
+                    
                     const waitForButton = () => {
-                        // Find the "Escolher" button using the correct selector
-                        const selectButton = cheapestTariff.querySelector('button[data-testid$="-flight-select"]');
+                        // Log all available buttons for debugging
+                        const allButtons = cheapestTariff.querySelectorAll('button');
+                        logger.log(`Found ${allButtons.length} buttons in cheapest tariff`, 'info');
+                        allButtons.forEach((btn, idx) => {
+                            logger.log(`Button ${idx}: ${btn.textContent.trim()} (data-testid: ${btn.getAttribute('data-testid')})`, 'info');
+                        });
                         
-                        if (selectButton && selectButton.offsetParent !== null) {  // Check if button is visible
-                            selectButton.click();
-                            waitingForButton = false;
+                        // Find the "Escolher" button using the correct selector
+                        const selectButton = cheapestTariff.querySelector(SELECTORS.tariffs.selectButton);
+                        
+                        if (selectButton) {
+                            logger.log('Found select button:', 'info');
+                            logger.log(`Button text: ${selectButton.textContent.trim()}`, 'info');
+                            logger.log(`Button visibility: ${selectButton.offsetParent !== null ? 'visible' : 'hidden'}`, 'info');
+                            logger.log(`Button enabled: ${!selectButton.disabled}`, 'info');
                             
-                            // After clicking, wait for return flight page to load
-                            const waitForReturnPage = () => {
-                                // Check for the specific return flight title
-                                const returnTitle = document.querySelector('#titleSelectFlightDesktop .route-title');
-                                const hasReturnTitle = returnTitle && returnTitle.textContent.trim().toLowerCase() === 'voo de volta';
-                                
-                                // Check for return flight cards
-                                const returnCards = document.querySelectorAll('[data-testid^="wrapper-card-flight-"]');
-                                const hasReturnCards = returnCards.length > 0;
-                                
-                                // Check if price elements are loaded in the return cards
-                                const allPricesLoaded = Array.from(returnCards).every(card => {
-                                    const priceElement = card.querySelector('.displayCurrencystyle__CurrencyAmount-sc__sc-hel5vp-2');
-                                    return priceElement && priceElement.textContent.trim() !== '';
-                                });
-
-                                if (hasReturnTitle && hasReturnCards && allPricesLoaded) {
-                                    logger.log('Return flight page loaded successfully with all elements', 'success');
+                            if (selectButton.offsetParent !== null) {  // Check if button is visible
+                                logger.log('Attempting to click select button...', 'info');
+                                try {
+                                    selectButton.click();
+                                    logger.log('Successfully clicked select button', 'success');
+                                    waitingForButton = false;
                                     
-                                    // Extract return flight information
-                                    const returnFlights = extractFlightInfo();
-                                    if (returnFlights && returnFlights.length) {
-                                        config.results.push(...returnFlights);
-                                        logger.log(`Successfully extracted ${returnFlights.length} return flights`, 'success');
-                                        saveState();
+                                    // After clicking, wait for return flight page to load
+                                    const waitForReturnPage = () => {
+                                        logger.log('Waiting for return flight page...', 'info');
                                         
-                                        // Move to next date
-                                        config.currentDateIndex++;
-                                        logger.log('Moving to next date after saving return flight info...');
-                                        saveState();
-                                        setTimeout(processNext, 2000);
-                                    } else {
-                                        logger.log('Failed to extract return flights, moving to next date', 'error');
-                                        config.currentDateIndex++;
-                                        saveState();
-                                        setTimeout(processNext, 2000);
-                                    }
+                                        // Check for the specific return flight title
+                                        const returnTitle = document.querySelector(SELECTORS.page.returnTitle);
+                                        const hasReturnTitle = returnTitle && returnTitle.textContent.trim().toLowerCase() === 'voo de volta';
+                                        logger.log(`Return title found: ${hasReturnTitle}`, 'info');
+                                        
+                                        // Check for return flight cards
+                                        const returnCards = document.querySelectorAll(SELECTORS.flightCards.main);
+                                        const hasReturnCards = returnCards.length > 0;
+                                        logger.log(`Return cards found: ${hasReturnCards} (${returnCards.length} cards)`, 'info');
+
+                                        if (hasReturnTitle && hasReturnCards) {
+                                            logger.log('Return flight page loaded successfully', 'success');
+                                            
+                                            // Extract return flight information
+                                            const { flights, selectedCard, selectedCardIndex } = extractFlightInfo();
+                                            if (flights && flights.length > 0 && selectedCard) {
+                                                logger.log(`Extracted ${flights.length} flights for one-way trip`);
+                                                config.results.push(...flights);
+                                                logger.log(`Successfully extracted ${flights.length} return flights`, 'success');
+                                                saveState();
+                                                
+                                                // Move to next date
+                                                config.currentDateIndex++;
+                                                logger.log('Moving to next date after saving return flight info...');
+                                                saveState();
+                                                setTimeout(processNext, 2000);
+                                            } else {
+                                                logger.log('Failed to extract return flights, moving to next date', 'error');
+                                                config.currentDateIndex++;
+                                                saveState();
+                                                setTimeout(processNext, 2000);
+                                            }
+                                            
+                                            resolve(true);
+                                            return;
+                                        }
+
+                                        if (navigationAttempts >= maxNavigationAttempts) {
+                                            logger.log('Max attempts reached waiting for return flight page', 'error');
+                                            resolve(false);
+                                            return;
+                                        }
+
+                                        navigationAttempts++;
+                                        setTimeout(waitForReturnPage, 1000);
+                                    };
                                     
-                                    resolve(true);
+                                    setTimeout(waitForReturnPage, 1000);
                                     return;
+                                } catch (error) {
+                                    logger.log(`Error clicking select button: ${error.message}`, 'error');
                                 }
-
-                                if (navigationAttempts >= maxNavigationAttempts) {
-                                    logger.log('Max attempts reached waiting for return flight page', 'error');
-                                    resolve(false);
-                                    return;
-                                }
-
-                                navigationAttempts++;
-                                setTimeout(waitForReturnPage, 1000);
-                            };
-                            
-                            setTimeout(waitForReturnPage, 1000);
-                            return;
+                            } else {
+                                logger.log('Select button found but not visible', 'warning');
+                            }
+                        } else {
+                            logger.log('Select button not found in cheapest tariff', 'warning');
                         }
 
                         if (buttonCheckAttempts >= maxButtonCheckAttempts) {
@@ -964,13 +1112,18 @@
             let attempts = 0;
             
             const checkForReturnPage = () => {
+                logger.log(`Checking for return flight page (attempt ${attempts + 1}/${maxAttempts})...`, 'info');
+                
                 // First check for the return flight header
                 const returnHeader = document.querySelector('h1, h2, h3, h4, h5, h6');
-                const isReturnPage = returnHeader && returnHeader.textContent.includes('voo de volta');
+                const headerText = returnHeader?.textContent.trim() || '';
+                const isReturnPage = headerText.includes('voo de volta');
+                
+                logger.log(`Header check - Found: ${!!returnHeader}, Text: "${headerText}", Is return page: ${isReturnPage}`, 'info');
                 
                 if (!isReturnPage) {
                     if (attempts >= maxAttempts) {
-                        logger.log('Not on return flight page', 'info');
+                        logger.log('Max attempts reached, not on return flight page', 'error');
                         resolve(false);
                         return;
                     }
@@ -980,23 +1133,18 @@
                 }
 
                 // Then check for flight cards
-                const flightCards = document.querySelectorAll('[data-testid^="wrapper-card-flight-"]');
+                const flightCards = document.querySelectorAll(SELECTORS.flightCards.main);
                 const hasFlightCards = flightCards.length > 0;
+                logger.log(`Flight cards check - Found: ${hasFlightCards}, Count: ${flightCards.length}`, 'info');
 
-                // Check if price elements are loaded
-                const allPricesLoaded = Array.from(flightCards).every(card => {
-                    const priceElement = card.querySelector('.displayCurrencystyle__CurrencyAmount-sc__sc-hel5vp-2');
-                    return priceElement && priceElement.textContent.trim() !== '';
-                });
-
-                if (hasFlightCards && allPricesLoaded) {
-                    logger.log('Return flight page fully loaded with prices', 'success');
+                if (hasFlightCards) {
+                    logger.log('Return flight page fully loaded with flight cards', 'success');
                     resolve(true);
                     return;
                 }
 
                 if (attempts >= maxAttempts) {
-                    logger.log('Return flight page elements not fully loaded', 'error');
+                    logger.log('Return flight page elements not fully loaded after max attempts', 'error');
                     resolve(false);
                     return;
                 }
@@ -1015,23 +1163,39 @@
             let attempts = 0;
             
             const checkForTariffList = () => {
-                const tariffList = document.querySelector('ol');
-                const tariffItems = tariffList?.querySelectorAll('li[data-brand]');
+                logger.log(`Checking for tariff list (attempt ${attempts + 1}/${maxAttempts})...`, 'info');
+                const tariffList = document.querySelector(SELECTORS.tariffs.list);
+                const tariffItems = tariffList?.querySelectorAll(SELECTORS.tariffs.item);
                 
                 if (tariffItems?.length > 0) {
+                    logger.log(`Found ${tariffItems.length} tariff items, checking prices...`, 'info');
+                    
                     // Check if all price elements are loaded
-                    const allPricesLoaded = Array.from(tariffItems).every(item => {
-                        const priceElement = item.querySelector('.displayCurrencystyle__CurrencyAmount-sc__sc-hel5vp-2');
-                        return priceElement && priceElement.textContent.trim() !== '';
+                    const priceElements = Array.from(tariffItems).map(item => ({
+                        element: item.querySelector(SELECTORS.flightCards.price.amount),
+                        price: item.querySelector(SELECTORS.flightCards.price.amount)?.textContent.trim()
+                    }));
+
+                    const allPricesLoaded = priceElements.every(p => p.element && p.price);
+                    
+                    logger.log('Price elements found:', 'info');
+                    priceElements.forEach((p, idx) => {
+                        logger.log(`Tariff ${idx}: Has element: ${!!p.element}, Price text: ${p.price || 'not found'}`, 'info');
                     });
 
                     if (allPricesLoaded) {
+                        logger.log('All tariff prices loaded successfully', 'success');
                         resolve(true);
                         return;
+                    } else {
+                        logger.log('Not all prices are loaded yet', 'warning');
                     }
+                } else {
+                    logger.log(`No tariff items found yet (List found: ${!!tariffList}, Items: ${tariffItems?.length || 0})`, 'info');
                 }
                 
                 if (attempts >= maxAttempts) {
+                    logger.log('Max attempts reached waiting for tariff list', 'error');
                     resolve(false);
                     return;
                 }
@@ -1113,210 +1277,392 @@
         statusContent.scrollTop = statusContent.scrollHeight;
     }
 
-    // Modified handlePageLoad function
+    // Modified handlePageLoad function with detailed logging
     async function handlePageLoad() {
+        logger.log('Page load handler started', 'info');
         loadState();
         
-        if (!config.isProcessing) return;
+        if (!config.isProcessing) {
+            logger.log('Processing is not active, exiting handler', 'info');
+            return;
+        }
 
+        logger.log('Checking for error messages...', 'info');
         // Check for error message
-        const errorDiv = document.querySelector('.error-message, .error-title, .error-description');
-        if (errorDiv && errorDiv.textContent.includes('Não foi possível encontrar voos')) {
-            const currentSearch = config.searches[config.currentSearchIndex];
-            const retryCount = currentSearch.retryCount || 0;
+        const errorDiv = document.querySelector(SELECTORS.page.errorMessage);
+        if (errorDiv) {
+            const errorText = errorDiv.textContent.trim();
+            logger.log(`Found error message: "${errorText}"`, 'warning');
+            
+            if (errorText.includes('Não foi possível encontrar voos')) {
+                const currentSearch = config.searches[config.currentSearchIndex];
+                const retryCount = currentSearch.retryCount || 0;
 
-            updateStatus(
-                `No flights found for ${currentSearch.origin} to ${currentSearch.destination} on ${currentSearch.currentDate}`,
-                'error',
-                [false, null, null]
-            );
+                logger.log(`No flights found for ${currentSearch.origin} to ${currentSearch.destination} on ${currentSearch.currentDate} (Retry ${retryCount}/3)`, 'warning');
 
-            if (retryCount < 3) {
-                currentSearch.retryCount = retryCount + 1;
-                updateStatus(`Retrying search (${retryCount + 1}/3)...`, 'warning');
-                saveState();
-                setTimeout(processNext, 5000);
-                return;
-            } else {
-                updateStatus('Max retries reached, moving to next search', 'error');
-                const failedFlight = {
-                    combination_id: `${currentSearch.origin}_${currentSearch.destination}_${currentSearch.currentDate}_${currentSearch.currentReturnDate || ''}_${currentSearch.use_points ? 'points' : 'cash'}_${currentSearch.trip_type}`,
-                    trip_type: currentSearch.trip_type,
-                    flight_type: currentSearch.trip_type === 'round_trip' ? 'outbound' : 'one_way',
-                    outbound_date: currentSearch.currentDate,
-                    return_date: currentSearch.currentReturnDate || '',
-                    date: currentSearch.currentDate,
-                    origin: currentSearch.origin,
-                    destination: currentSearch.destination,
-                    status: 'failed',
-                    retries: 3,
-                    use_points: currentSearch.use_points
-                };
-                
-                config.results.push(failedFlight);
-                currentSearch.retryCount = 0;
-                config.currentDateIndex++;
-                saveState();
-                setTimeout(processNext, 2000);
-                return;
+                if (retryCount < 3) {
+                    currentSearch.retryCount = retryCount + 1;
+                    logger.log(`Retrying search (${retryCount + 1}/3)...`, 'info');
+                    saveState();
+                    setTimeout(processNext, 5000);
+                    return;
+                } else {
+                    logger.log('Max retries reached, recording failed search', 'error');
+                    const failedFlight = {
+                        combination_id: `${currentSearch.origin}_${currentSearch.destination}_${currentSearch.currentDate}_${currentSearch.currentReturnDate || ''}_${currentSearch.use_points ? 'points' : 'cash'}_${currentSearch.trip_type}`,
+                        trip_type: currentSearch.trip_type,
+                        flight_type: currentSearch.trip_type === 'round_trip' ? 'outbound' : 'one_way',
+                        outbound_date: currentSearch.currentDate,
+                        return_date: currentSearch.currentReturnDate || '',
+                        date: currentSearch.currentDate,
+                        origin: currentSearch.origin,
+                        destination: currentSearch.destination,
+                        status: 'failed',
+                        retries: 3,
+                        use_points: currentSearch.use_points
+                    };
+                    
+                    config.results.push(failedFlight);
+                    currentSearch.retryCount = 0;
+                    config.currentDateIndex++;
+                    saveState();
+                    setTimeout(processNext, 2000);
+                    return;
+                }
             }
         }
 
+        logger.log('Waiting for flight cards to appear...', 'info');
         // Wait for flight cards to appear
-        waitForFlightCards().then(async found => {
-            if (found) {
-                const currentSearch = config.searches[config.currentSearchIndex];
-                const isRoundTrip = currentSearch.trip_type === 'round_trip';
+        const flightCardsFound = await waitForFlightCards();
+        
+        if (flightCardsFound) {
+            const currentSearch = config.searches[config.currentSearchIndex];
+            const isRoundTrip = currentSearch.trip_type === 'round_trip';
+            
+            logger.log(`Processing ${isRoundTrip ? 'round trip' : 'one way'} search for ${currentSearch.origin} to ${currentSearch.destination}`, 'info');
+            
+            currentSearch.retryCount = 0;
 
-                currentSearch.retryCount = 0;
+            if (isRoundTrip) {
+                const returnTitle = document.querySelector(SELECTORS.page.returnTitle);
+                const isReturnPage = returnTitle && returnTitle.textContent.trim().toLowerCase() === 'voo de volta';
 
-                if (isRoundTrip) {
-                    const returnTitle = document.querySelector('#titleSelectFlightDesktop .route-title');
-                    const isReturnPage = returnTitle && returnTitle.textContent.trim().toLowerCase() === 'voo de volta';
+                if (isReturnPage) {
+                    logger.log('Processing return flight page...', 'info');
+                    updateStatus(
+                        `Processing return flight for ${currentSearch.destination} to ${currentSearch.origin}`,
+                        'info',
+                        [true, true, 'pending']
+                    );
 
-                    if (isReturnPage) {
-                        updateStatus(
-                            `Processing return flight for ${currentSearch.destination} to ${currentSearch.origin}`,
-                            'info',
-                            [true, true, 'pending']
-                        );
-
-                        await waitForFlightCards();
-                        const flights = extractFlightInfo();
-                        if (flights && flights.length) {
+                    await waitForFlightCards();
+                    
+                    let retryCount = 0;
+                    const maxRetries = 3;
+                    
+                    while (retryCount < maxRetries) {
+                        const { flights, selectedCard, selectedCardIndex } = extractFlightInfo();
+                        
+                        if (flights && flights.length > 0 && selectedCard) {
+                            logger.log(`Successfully extracted ${flights.length} return flight(s)`, 'success');
                             config.results.push(...flights);
-                            updateStatus(
-                                `Successfully extracted return flight information`,
-                                'success',
-                                [true, true, true]
-                            );
-                            saveState();
                             
-                            config.currentDateIndex++;
-                            setTimeout(processNext, 2000);
-                        } else {
-                            updateStatus(
-                                `Failed to extract return flight information`,
-                                'error',
-                                [true, true, false]
-                            );
-                            const retryCount = currentSearch.retryCount || 0;
-                            if (retryCount < 3) {
-                                currentSearch.retryCount = retryCount + 1;
-                                updateStatus(`Retrying search (${retryCount + 1}/3)...`, 'warning');
-                                setTimeout(processNext, 5000);
-                            } else {
-                                config.currentDateIndex++;
-                                setTimeout(processNext, 2000);
-                            }
-                        }
-                    } else {
-                        updateStatus(
-                            `Processing outbound flight for ${currentSearch.origin} to ${currentSearch.destination}`,
-                            'info',
-                            [null, null, null]
-                        );
+                            try {
+                                logger.log('Attempting to click return flight card...');
+                                
+                                // First try the specific clickable selector
+                                const clickableElement = selectedCard.querySelector(SELECTORS.flightCards.clickable);
+                                if (clickableElement) {
+                                    logger.log('Found clickable element with specific selector', 'info');
+                                    logger.log(`Clickable element text: "${clickableElement.textContent.trim()}"`, 'info');
+                                    logger.log(`Clickable element data-testid: "${clickableElement.getAttribute('data-testid')}"`, 'info');
+                                    
+                                    // Try clicking the element
+                                    clickableElement.click();
+                                    logger.log('Successfully clicked return flight card', 'success');
+                                    updateStatus(
+                                        `Successfully extracted return flight information`,
+                                        'success',
+                                        [true, true, true]
+                                    );
+                                    saveState();
+                                    config.currentDateIndex++;
+                                    setTimeout(processNext, 2000);
+                                    return true;
+                                } else {
+                                    // Fallback to finding any clickable elements
+                                    const clickableElements = selectedCard.querySelectorAll('button, [role="button"], a, [tabindex="0"]');
+                                    logger.log(`Found ${clickableElements.length} general clickable elements in the card`, 'info');
+                                    
+                                    // Try to find the most appropriate element to click
+                                    let targetElement = null;
+                                    
+                                    // First try to find a button with "select" or "choose" text
+                                    for (const element of clickableElements) {
+                                        const text = element.textContent.toLowerCase().trim();
+                                        if (text.includes('selecionar') || text.includes('escolher') || text.includes('select') || text.includes('choose')) {
+                                            targetElement = element;
+                                            logger.log(`Found select/choose button with text: ${text}`, 'info');
+                                            break;
+                                        }
+                                    }
+                                    
+                                    // If no specific button found, try the first clickable element
+                                    if (!targetElement && clickableElements.length > 0) {
+                                        targetElement = clickableElements[0];
+                                        logger.log('Using first clickable element as fallback', 'info');
+                                    }
+                                    
+                                    // If still no target found, try clicking the card itself
+                                    if (!targetElement) {
+                                        targetElement = selectedCard;
+                                        logger.log('Using card itself as clickable target', 'info');
+                                    }
 
-                        const outboundFlights = extractFlightInfo();
-                        if (outboundFlights && outboundFlights.length) {
-                            config.results.push(...outboundFlights);
-                            updateStatus(
-                                `Successfully extracted outbound flight information`,
-                                'success',
-                                [true, 'pending', null]
-                            );
-                            saveState();
-
-                            const cardSelected = await selectCheapestFlightCard();
-                            if (cardSelected) {
-                                updateStatus(
-                                    `Selected outbound flight`,
-                                    'info',
-                                    [true, 'pending', null]
-                                );
-
-                                const tariffListLoaded = await waitForTariffList();
-                                if (tariffListLoaded) {
-                                    const tariffSelected = await selectCheapestTariff();
-                                    if (tariffSelected) {
-                                        updateStatus(
-                                            `Selected tariff`,
-                                            'success',
-                                            [true, true, 'pending']
-                                        );
-                                    } else {
-                                        updateStatus(
-                                            `Failed to select tariff`,
-                                            'error',
-                                            [true, false, null]
-                                        );
-                                        const retryCount = currentSearch.retryCount || 0;
-                                        if (retryCount < 3) {
-                                            currentSearch.retryCount = retryCount + 1;
-                                            updateStatus(`Retrying search (${retryCount + 1}/3)...`, 'warning');
-                                            setTimeout(processNext, 5000);
-                                        } else {
+                                    if (targetElement) {
+                                        // Try different click methods
+                                        logger.log('Attempting click with multiple methods...', 'info');
+                                        
+                                        try {
+                                            // Method 1: Direct click
+                                            targetElement.click();
+                                            logger.log('Direct click successful', 'success');
+                                            updateStatus(
+                                                `Successfully extracted return flight information`,
+                                                'success',
+                                                [true, true, true]
+                                            );
+                                            saveState();
                                             config.currentDateIndex++;
                                             setTimeout(processNext, 2000);
+                                            return true;
+                                        } catch (clickError) {
+                                            logger.log(`Click attempt error: ${clickError.message}`, 'warning');
+                                            // Continue to next retry
                                         }
                                     }
                                 }
+                            } catch (error) {
+                                logger.log(`Error clicking return flight card: ${error.message}`, 'error');
                             }
                         }
+                        
+                        logger.log(`Return flight extraction attempt ${retryCount + 1} failed`, 'warning');
+                        retryCount++;
+                        if (retryCount < maxRetries) {
+                            updateStatus(`Retrying search (${retryCount}/3)...`, 'warning');
+                            logger.log('Waiting before retry...', 'info');
+                            await sleep(2000); // Wait 2 seconds before retrying
+                        }
+                    }
+                    
+                    if (retryCount === maxRetries) {
+                        logger.log('Failed to extract return flight after maximum retries', 'error');
+                        updateStatus(
+                            `Failed to extract return flight information`,
+                            'error',
+                            [true, true, false]
+                        );
+                        config.currentDateIndex++;
+                        setTimeout(processNext, 2000);
+                        return false;
                     }
                 } else {
                     updateStatus(
-                        `Processing one-way flight for ${currentSearch.origin} to ${currentSearch.destination}`,
+                        `Processing outbound flight for ${currentSearch.origin} to ${currentSearch.destination}`,
                         'info',
                         [null, null, null]
                     );
 
-                    const flights = extractFlightInfo();
-                    if (flights && flights.length) {
+                    const { flights, selectedCard, selectedCardIndex } = extractFlightInfo();
+                    if (flights && selectedCard) {
+                        logger.log(`Extracted ${flights.length} flights, Selected card index: ${selectedCardIndex}`, 'info');
                         config.results.push(...flights);
                         updateStatus(
-                            `Successfully extracted flight information`,
+                            `Successfully extracted outbound flight information`,
                             'success',
-                            [true, null, null]
+                            [true, 'pending', null]
                         );
                         saveState();
-                    } else {
-                        updateStatus(
-                            `Failed to extract flight information`,
-                            'error',
-                            [false, null, null]
-                        );
-                        const retryCount = currentSearch.retryCount || 0;
-                        if (retryCount < 3) {
-                            currentSearch.retryCount = retryCount + 1;
-                            updateStatus(`Retrying search (${retryCount + 1}/3)...`, 'warning');
-                            setTimeout(processNext, 5000);
-                            return;
+
+                        try {
+                            logger.log(`Attempting to click flight card at index ${selectedCardIndex}...`, 'info');
+                            
+                            // First try the specific clickable selector
+                            const clickableElement = selectedCard.querySelector(SELECTORS.flightCards.clickable);
+                            if (clickableElement) {
+                                logger.log('Found clickable element with specific selector', 'info');
+                                logger.log(`Clickable element text: "${clickableElement.textContent.trim()}"`, 'info');
+                                logger.log(`Clickable element data-testid: "${clickableElement.getAttribute('data-testid')}"`, 'info');
+                                
+                                // Try clicking the element with multiple methods
+                                let clickSuccess = false;
+                                
+                                // Method 1: Direct click
+                                try {
+                                    clickableElement.click();
+                                    logger.log('Direct click successful', 'success');
+                                    clickSuccess = true;
+                                } catch (e) {
+                                    logger.log(`Direct click failed: ${e.message}`, 'warning');
+                                }
+
+                                // Method 2: MouseEvent if direct click failed
+                                if (!clickSuccess) {
+                                    try {
+                                        const mouseEvent = new MouseEvent('click', {
+                                            view: window,
+                                            bubbles: true,
+                                            cancelable: true
+                                        });
+                                        clickableElement.dispatchEvent(mouseEvent);
+                                        logger.log('MouseEvent click successful', 'success');
+                                        clickSuccess = true;
+                                    } catch (e) {
+                                        logger.log(`MouseEvent click failed: ${e.message}`, 'warning');
+                                    }
+                                }
+
+                                // Method 3: Programmatic click if previous methods failed
+                                if (!clickSuccess) {
+                                    try {
+                                        const dataTestId = clickableElement.getAttribute('data-testid');
+                                        if (dataTestId) {
+                                            const script = document.createElement('script');
+                                            script.textContent = `
+                                                document.querySelector('[data-testid="${dataTestId}"]')?.click();
+                                            `;
+                                            document.body.appendChild(script);
+                                            document.body.removeChild(script);
+                                            logger.log('Programmatic click successful', 'success');
+                                            clickSuccess = true;
+                                        }
+                                    } catch (e) {
+                                        logger.log(`Programmatic click failed: ${e.message}`, 'warning');
+                                    }
+                                }
+
+                                if (!clickSuccess) {
+                                    throw new Error('All click methods failed');
+                                }
+                            } else {
+                                // Fallback to finding any clickable elements
+                                const clickableElements = selectedCard.querySelectorAll('button, [role="button"], a, [tabindex="0"]');
+                                logger.log(`Found ${clickableElements.length} general clickable elements in the card`, 'info');
+                                
+                                let targetElement = null;
+                                
+                                // First try to find a button with "select" or "choose" text
+                                for (const element of clickableElements) {
+                                    const text = element.textContent.toLowerCase().trim();
+                                    if (text.includes('selecionar') || text.includes('escolher') || text.includes('select') || text.includes('choose')) {
+                                        targetElement = element;
+                                        logger.log(`Found select/choose button with text: "${text}"`, 'info');
+                                        break;
+                                    }
+                                }
+                                
+                                // If no specific button found, try the first clickable element
+                                if (!targetElement && clickableElements.length > 0) {
+                                    targetElement = clickableElements[0];
+                                    logger.log('Using first clickable element as fallback', 'info');
+                                }
+
+                                if (targetElement) {
+                                    targetElement.click();
+                                    logger.log('Successfully clicked fallback element', 'success');
+                                } else {
+                                    throw new Error('No clickable elements found');
+                                }
+                            }
+
+                            // Wait for tariff list
+                            logger.log('Waiting for tariff list to appear...', 'info');
+                            const tariffListLoaded = await waitForTariffList();
+                            if (tariffListLoaded) {
+                                const tariffSelected = await selectCheapestTariff();
+                                if (tariffSelected) {
+                                    updateStatus(
+                                        `Selected tariff successfully`,
+                                        'success',
+                                        [true, true, 'pending']
+                                    );
+                                    logger.log('Tariff selection completed successfully', 'success');
+                                } else {
+                                    throw new Error('Failed to select tariff');
+                                }
+                            } else {
+                                throw new Error('Tariff list did not load');
+                            }
+                        } catch (error) {
+                            logger.log(`Error in flight selection process: ${error.message}`, 'error');
+                            const retryCount = currentSearch.retryCount || 0;
+                            if (retryCount < 3) {
+                                currentSearch.retryCount = retryCount + 1;
+                                logger.log(`Scheduling retry attempt ${retryCount + 1}/3`, 'warning');
+                                updateStatus(`Retrying search (${retryCount + 1}/3)...`, 'warning');
+                                setTimeout(processNext, 5000);
+                            } else {
+                                logger.log('Maximum retry attempts reached, moving to next date', 'warning');
+                                config.currentDateIndex++;
+                                setTimeout(processNext, 2000);
+                            }
                         }
                     }
-
-                    config.currentDateIndex++;
-                    setTimeout(processNext, 2000);
                 }
             } else {
-                const currentSearch = config.searches[config.currentSearchIndex];
                 updateStatus(
-                    `No flight cards found for ${currentSearch.origin} to ${currentSearch.destination}`,
-                    'error',
-                    [false, null, null]
+                    `Processing one-way flight for ${currentSearch.origin} to ${currentSearch.destination}`,
+                    'info',
+                    [null, null, null]
                 );
 
-                const retryCount = currentSearch.retryCount || 0;
-                if (retryCount < 3) {
-                    currentSearch.retryCount = retryCount + 1;
-                    updateStatus(`Retrying search (${retryCount + 1}/3)...`, 'warning');
-                    setTimeout(processNext, 5000);
+                const { flights } = extractFlightInfo();
+                if (flights && flights.length) {
+                    config.results.push(...flights);
+                    updateStatus(
+                        `Successfully extracted flight information`,
+                        'success',
+                        [true, null, null]
+                    );
+                    saveState();
                 } else {
-                    config.currentDateIndex++;
-                    setTimeout(processNext, 2000);
+                    updateStatus(
+                        `Failed to extract flight information`,
+                        'error',
+                        [false, null, null]
+                    );
+                    const retryCount = currentSearch.retryCount || 0;
+                    if (retryCount < 3) {
+                        currentSearch.retryCount = retryCount + 1;
+                        updateStatus(`Retrying search (${retryCount + 1}/3)...`, 'warning');
+                        setTimeout(processNext, 5000);
+                        return;
+                    }
                 }
+
+                config.currentDateIndex++;
+                setTimeout(processNext, 2000);
             }
-        });
+        } else {
+            const currentSearch = config.searches[config.currentSearchIndex];
+            updateStatus(
+                `No flight cards found for ${currentSearch.origin} to ${currentSearch.destination}`,
+                'error',
+                [false, null, null]
+            );
+
+            const retryCount = currentSearch.retryCount || 0;
+            if (retryCount < 3) {
+                currentSearch.retryCount = retryCount + 1;
+                updateStatus(`Retrying search (${retryCount + 1}/3)...`, 'warning');
+                setTimeout(processNext, 5000);
+            } else {
+                config.currentDateIndex++;
+                setTimeout(processNext, 2000);
+            }
+        }
     }
 
     // Add UI elements
@@ -1809,6 +2155,9 @@
 
     // Initialize
     window.addEventListener('load', () => {
+        // Load saved selectors first
+        loadSelectors();
+        
         // Wait for jQuery to be properly loaded
         const checkJQuery = setInterval(() => {
             if (window.jQuery && window.moment && window.jQuery.fn.daterangepicker) {
